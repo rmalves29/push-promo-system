@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
 function isIos() {
   if (typeof window === 'undefined') return false
@@ -12,34 +12,73 @@ function isInStandaloneMode() {
   return ('standalone' in window.navigator) && (window.navigator as { standalone?: boolean }).standalone === true
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
+
 export default function Home() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'subscribed' | 'error'>('idle')
   const [message, setMessage] = useState('')
   const [showIosGuide, setShowIosGuide] = useState(false)
+  const deferredPrompt = useRef<BeforeInstallPromptEvent | null>(null)
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js')
     }
 
-    // Detecta iOS fora do modo standalone (PWA não instalado)
+    // Captura o evento de instalação do PWA no Android/Chrome
+    const handler = (e: Event) => {
+      e.preventDefault()
+      deferredPrompt.current = e as BeforeInstallPromptEvent
+    }
+    window.addEventListener('beforeinstallprompt', handler)
+
+    // iOS fora do modo standalone → mostra guia
     if (isIos() && !isInStandaloneMode()) {
       setShowIosGuide(true)
       return
     }
 
-    // Auto-subscribe se ?auto=1 na URL
+    // Auto-subscribe se ?push=1 na URL
     const params = new URLSearchParams(window.location.search)
-    if (params.get('auto') === '1') {
+    if (params.get('auto') === '1' || params.get('push') === '1') {
       subscribe()
     }
+
+    return () => window.removeEventListener('beforeinstallprompt', handler)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function subscribe() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      // Android com PWA não instalado — tenta instalar primeiro
+      if (deferredPrompt.current) {
+        await deferredPrompt.current.prompt()
+        const { outcome } = await deferredPrompt.current.userChoice
+        if (outcome === 'dismissed') {
+          setStatus('error')
+          setMessage('Instale o app para receber as notificações.')
+          return
+        }
+        deferredPrompt.current = null
+        setMessage('App instalado! Agora ative as notificações abrindo o app.')
+        setStatus('subscribed')
+        return
+      }
       setStatus('error')
       setMessage('Seu navegador não suporta notificações push.')
       return
+    }
+
+    // Se tem prompt de instalação pendente no Android, instala primeiro
+    if (deferredPrompt.current) {
+      await deferredPrompt.current.prompt()
+      const { outcome } = await deferredPrompt.current.userChoice
+      deferredPrompt.current = null
+      if (outcome === 'dismissed') {
+        // Continua mesmo assim — pode funcionar sem instalar no Android
+      }
     }
 
     const permission = await Notification.requestPermission()
@@ -84,7 +123,7 @@ export default function Home() {
     }
   }
 
-  // Guia para iOS — precisa instalar como PWA primeiro
+  // Guia para iOS
   if (showIosGuide) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -94,15 +133,14 @@ export default function Home() {
             Instale o app para receber promoções
           </h1>
           <p className="text-gray-500 mb-6">
-            No iPhone/iPad, siga os passos abaixo para ativar as notificações:
+            No iPhone/iPad, siga os passos abaixo:
           </p>
-
           <div className="text-left space-y-4 mb-6">
             <div className="flex items-start gap-3 bg-gray-50 rounded-xl p-3">
               <span className="text-2xl">1️⃣</span>
               <div>
                 <p className="font-semibold text-gray-700">Toque em Compartilhar</p>
-                <p className="text-sm text-gray-500">Toque no ícone <span className="font-bold">□↑</span> na barra inferior do Safari</p>
+                <p className="text-sm text-gray-500">Ícone <span className="font-bold">□↑</span> na barra inferior do Safari</p>
               </div>
             </div>
             <div className="flex items-start gap-3 bg-gray-50 rounded-xl p-3">
@@ -120,10 +158,7 @@ export default function Home() {
               </div>
             </div>
           </div>
-
-          <p className="text-xs text-gray-400">
-            Requer iOS 16.4 ou superior
-          </p>
+          <p className="text-xs text-gray-400">Requer iOS 16.4 ou superior</p>
         </div>
       </main>
     )
