@@ -2,8 +2,14 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Push Promo System',
-  description: 'Sistema de notificações push para promoções',
+  title: 'Promoções',
+  description: 'Receba promoções exclusivas',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Promoções',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
