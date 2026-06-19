@@ -10,9 +10,27 @@ export default function Home() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js')
     }
-  }, [])
+    // Auto-subscribe if ?auto=1 is in the URL (para links de anúncios)
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('auto') === '1') {
+      subscribe()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function subscribe() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setStatus('error')
+      setMessage('Seu navegador não suporta notificações push.')
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      setStatus('error')
+      setMessage('Permissão negada. Habilite as notificações nas configurações do navegador.')
+      return
+    }
+
     setStatus('loading')
     try {
       const registration = await navigator.serviceWorker.ready
