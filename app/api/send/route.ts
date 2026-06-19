@@ -23,15 +23,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const payload = JSON.stringify({ title, body, url: url || '/' })
+  // Salva a campanha primeiro para obter o ID (usado no tracking de cliques)
+  const { data: campaign } = await supabase
+    .from('campaigns')
+    .insert({ title, body, url, recipients: 0, failed: 0, clicks: 0, unsubscribed: 0 })
+    .select('id')
+    .single()
+
+  const campaignId = campaign?.id
+
+  // URL de tracking de clique
+  const trackingUrl = campaignId
+    ? `https://push-promo-system.vercel.app/api/track/click?cid=${campaignId}&url=${encodeURIComponent(url || '/')}`
+    : url || '/'
+
+  const payload = JSON.stringify({ title, body, url: trackingUrl })
 
   const results = await Promise.allSettled(
     subscribers.map((sub) =>
       webpush.sendNotification(
-        {
-          endpoint: sub.endpoint,
-          keys: { p256dh: sub.p256dh, auth: sub.auth },
-        },
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
         payload
       )
     )
@@ -40,7 +51,6 @@ export async function POST(req: NextRequest) {
   const sent = results.filter((r) => r.status === 'fulfilled').length
   const failed = results.filter((r) => r.status === 'rejected').length
 
-  // Remove subscribers that returned 410 Gone (unsubscribed)
   const expiredEndpoints: string[] = []
   results.forEach((result, i) => {
     if (
@@ -55,8 +65,14 @@ export async function POST(req: NextRequest) {
     await supabase.from('subscribers').delete().in('endpoint', expiredEndpoints)
   }
 
-  // Save campaign to history
-  await supabase.from('campaigns').insert({ title, body, url, recipients: sent })
+  // Atualiza campanha com estatísticas reais
+  if (campaignId) {
+    await supabase.from('campaigns').update({
+      recipients: sent,
+      failed,
+      unsubscribed: expiredEndpoints.length,
+    }).eq('id', campaignId)
+  }
 
-  return NextResponse.json({ sent, failed })
+  return NextResponse.json({ sent, failed, unsubscribed: expiredEndpoints.length })
 }

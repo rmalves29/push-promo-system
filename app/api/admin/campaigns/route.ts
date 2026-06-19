@@ -6,7 +6,7 @@ export async function GET() {
     .from('campaigns')
     .select('*')
     .order('sent_at', { ascending: false })
-    .limit(20)
+    .limit(50)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
