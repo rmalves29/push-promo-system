@@ -7,11 +7,8 @@ export async function GET(req: NextRequest) {
   const url = searchParams.get('url') || '/'
 
   if (cid) {
-    await supabase.rpc('increment_clicks', { campaign_id: cid }).catch(() => {
-      supabase.from('campaigns').select('clicks').eq('id', cid).single().then(({ data }) => {
-        supabase.from('campaigns').update({ clicks: (data?.clicks || 0) + 1 }).eq('id', cid)
-      })
-    })
+    const { data } = await supabase.from('campaigns').select('clicks').eq('id', cid).single()
+    await supabase.from('campaigns').update({ clicks: (data?.clicks || 0) + 1 }).eq('id', cid)
   }
 
   return NextResponse.redirect(url)
